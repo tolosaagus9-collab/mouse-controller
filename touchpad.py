@@ -9,9 +9,11 @@ Uso:  python3 touchpad.py [--port 8765] [--dry-run]
 """
 import argparse
 import asyncio
+import errno
 import pathlib
 import secrets
 import socket
+import sys
 
 from aiohttp import web, WSMsgType
 
@@ -173,6 +175,30 @@ def make_app(mouse: VirtualMouse, token: str):
     return app
 
 
+def open_socket(host, port, tries=20):
+    """Abre el socket de escucha. Si el puerto está ocupado prueba los siguientes."""
+    for p in range(port, port + tries):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, p))
+        except OSError as err:
+            sock.close()
+            if err.errno != errno.EADDRINUSE:
+                raise
+            if p == port:
+                print(f"\n⚠  El puerto {port} ya está en uso (¿quedó otra instancia abierta?).")
+                print(f"   Para ver qué lo usa:  ss -ltnp 'sport = :{port}'")
+            continue
+        sock.listen(128)
+        sock.setblocking(False)
+        if p != port:
+            print(f"   Usando el puerto {p} en su lugar. Abrilo en el firewall:")
+            print(f"   sudo firewall-cmd --permanent --add-port={p}/tcp && sudo firewall-cmd --reload")
+        return sock, p
+    sys.exit(f"No encontré un puerto libre entre {port} y {port + tries - 1}.")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Touchpad remoto vía celular")
     ap.add_argument("--port", type=int, default=8765)
@@ -182,8 +208,9 @@ def main():
     args = ap.parse_args()
 
     token = args.token or secrets.token_urlsafe(6)
+    sock, port = open_socket(args.host, args.port)
     mouse = VirtualMouse(dry_run=args.dry_run)
-    url = f"http://{local_ip()}:{args.port}/?t={token}"
+    url = f"http://{local_ip()}:{port}/?t={token}"
 
     print("\nAbrí esta URL en el celular (misma red Wi-Fi):\n")
     print("   ", url, "\n")
@@ -196,7 +223,7 @@ def main():
     except ImportError:
         print("(Tip: instalá python3-qrcode para ver un QR acá)")
 
-    web.run_app(make_app(mouse, token), host=args.host, port=args.port, print=None)
+    web.run_app(make_app(mouse, token), sock=sock, print=None)
 
 
 if __name__ == "__main__":
