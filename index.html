@@ -14,41 +14,91 @@
   html, body { margin: 0; height: 100%; background: #111; color: #ccc;
       font-family: -apple-system, system-ui, sans-serif; overflow: hidden;
       overscroll-behavior: none; }
-  body { display: flex; flex-direction: column;
-      padding: env(safe-area-inset-top) env(safe-area-inset-right)
-               env(safe-area-inset-bottom) env(safe-area-inset-left); }
-  #bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 13px; }
-  #dot { width: 10px; height: 10px; border-radius: 50%; background: #c33; }
+
+  /* Horizontal (por defecto): pad a la izquierda, controles a la derecha */
+  #app { position: fixed; top: 0; left: 0; right: 0; height: 100%;
+      display: grid; gap: 8px;
+      grid-template-columns: 1fr 168px; grid-template-rows: auto 1fr;
+      grid-template-areas: "keys side" "pad side";
+      padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right))
+               max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
+  #keys { grid-area: keys; display: none; gap: 5px; }
+  #app.kb #keys { display: flex; }
+  #pad  { grid-area: pad; border-radius: 18px; background: #1d1d1f; touch-action: none;
+      display: flex; align-items: center; justify-content: center; position: relative;
+      color: #444; font-size: 13px; text-align: center; line-height: 1.6; min-height: 0; }
+  #echo { position: absolute; left: 14px; right: 14px; bottom: 10px; color: #777;
+      font: 14px ui-monospace, monospace; white-space: pre; overflow: hidden;
+      text-align: right; pointer-events: none; }
+  #side { grid-area: side; display: grid; gap: 8px; min-height: 0;
+      grid-template-columns: 1fr 1fr; grid-template-rows: auto 2fr 1fr 1fr;
+      grid-template-areas: "bar bar" "l r" "drag drag" "kbd kbd"; }
+
+  /* Vertical: todo en columna */
+  @media (orientation: portrait) {
+    #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr 150px;
+        grid-template-areas: "keys" "pad" "side"; }
+    #side { grid-template-columns: 1fr 1fr 1fr 1fr; grid-template-rows: auto 1fr;
+        grid-template-areas: "bar bar bar bar" "l drag kbd r"; }
+    #keys { flex-wrap: wrap; }
+  }
+
+  #bar { grid-area: bar; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+  #status { display: flex; align-items: center; gap: 6px; }
+  #dot { width: 9px; height: 9px; border-radius: 50%; background: #c33; }
   #dot.ok { background: #3c3; }
-  #bar label { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-  #pad { flex: 1; margin: 0 10px; border-radius: 18px; background: #1d1d1f;
-      touch-action: none; display: flex; align-items: center; justify-content: center;
-      color: #444; font-size: 13px; text-align: center; line-height: 1.6; }
-  #btns { display: flex; gap: 10px; padding: 10px; height: 90px; }
-  #btns div { flex: 1; border-radius: 14px; background: #2a2a2d; touch-action: none;
-      display: flex; align-items: center; justify-content: center; font-size: 15px; }
-  #btns div.on { background: #4a4a50; }
-  #btns #drag.on { background: #2d5aa0; }
+  #sens { width: 100%; }
+  .btn { border-radius: 14px; background: #2a2a2d; touch-action: none;
+      display: flex; align-items: center; justify-content: center; font-size: 15px;
+      min-height: 0; }
+  .btn.on { background: #4a4a50; }
+  #bl { grid-area: l; } #br { grid-area: r; }
+  #drag { grid-area: drag; } #drag.on { background: #2d5aa0; }
+  #kbd { grid-area: kbd; } #app.kb #kbd { background: #2d5aa0; }
+  #keys .btn { flex: 1; height: 44px; font-size: 14px; border-radius: 10px; min-width: 44px; }
+  #keys .btn.mod.on { background: #2d5aa0; }
+
+  /* Campo invisible que recibe el teclado del iPhone */
+  #ta { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0;
+      border: 0; padding: 0; resize: none; font-size: 16px; /* 16px evita el zoom de iOS */ }
 </style>
 </head>
 <body>
-<div id="bar">
-  <div id="dot"></div><span id="st">Conectando…</span>
-  <label>Vel <input id="sens" type="range" min="0.5" max="4" step="0.1"></label>
-</div>
-<div id="pad">1 dedo: mover · tap: click<br>2 dedos: scroll · tap 2 dedos: click derecho<br>
-  3 dedos tap: click medio · doble tap y arrastrar: drag</div>
-<div id="btns">
-  <div data-b="l">Izq</div>
-  <div id="drag">Mantener</div>
-  <div data-b="r">Der</div>
+<textarea id="ta" autocomplete="off" autocorrect="off" autocapitalize="off"
+          spellcheck="false" enterkeyhint="enter"></textarea>
+<div id="app">
+  <div id="keys">
+    <div class="btn" data-k="esc">Esc</div>
+    <div class="btn" data-k="tab">Tab</div>
+    <div class="btn mod" data-m="ctrl">Ctrl</div>
+    <div class="btn mod" data-m="alt">Alt</div>
+    <div class="btn mod" data-m="super">Super</div>
+    <div class="btn" data-k="left">←</div>
+    <div class="btn" data-k="up">↑</div>
+    <div class="btn" data-k="down">↓</div>
+    <div class="btn" data-k="right">→</div>
+    <div class="btn" data-k="backspace">⌫</div>
+    <div class="btn" data-k="enter">⏎</div>
+  </div>
+  <div id="pad">1 dedo: mover · tap: click<br>2 dedos: scroll · tap 2 dedos: click derecho<br>
+    3 dedos tap: click medio · doble tap y arrastrar: drag<div id="echo"></div></div>
+  <div id="side">
+    <div id="bar">
+      <div id="status"><div id="dot"></div><span id="st">Conectando…</span></div>
+      <label>Velocidad<input id="sens" type="range" min="0.5" max="4" step="0.1"></label>
+    </div>
+    <div class="btn" id="bl" data-b="l">Izq</div>
+    <div class="btn" id="br" data-b="r">Der</div>
+    <div class="btn" id="drag">Mantener</div>
+    <div class="btn" id="kbd">⌨ Teclado</div>
+  </div>
 </div>
 <script>
 (() => {
   const qs = new URLSearchParams(location.search);
   const token = qs.get("t") || "";
-  const dot = document.getElementById("dot"), st = document.getElementById("st");
-  const sensEl = document.getElementById("sens");
+  const $ = (id) => document.getElementById(id);
+  const app = $("app"), dot = $("dot"), st = $("st"), sensEl = $("sens");
 
   // ---- Ajustes ----
   let sens = 1.6;
@@ -72,11 +122,20 @@
   connect();
   const send = (s) => { if (ws && ws.readyState === 1) ws.send(s); };
 
+  // Botón táctil genérico: no roba el foco (así el teclado del iPhone no se cierra)
+  function onTap(el, down, up) {
+    el.addEventListener("touchstart", (e) => { e.preventDefault(); down && down(e); }, { passive: false });
+    if (up) {
+      el.addEventListener("touchend", (e) => { e.preventDefault(); up(e); });
+      el.addEventListener("touchcancel", (e) => { e.preventDefault(); up(e); });
+    }
+  }
+
   // ---- Gestos en el pad ----
-  const pad = document.getElementById("pad");
+  const pad = $("pad");
   const last = new Map();    // identifier -> {x, y}
   let g = null;              // gesto actual
-  let lastTapEnd = -1e9;       // para doble-tap-drag
+  let lastTapEnd = -1e9;     // para doble-tap-drag
   let dragging = false;      // botón izq. apretado por gesto
   let lastMoveT = 0;
 
@@ -100,7 +159,6 @@
   pad.addEventListener("touchmove", (ev) => {
     ev.preventDefault();
     if (!g) return;
-    // Delta promedio de los dedos que ya conocíamos
     let dx = 0, dy = 0, n = 0;
     for (const t of ev.touches) {
       const p = last.get(t.identifier);
@@ -117,12 +175,9 @@
 
     if (ev.touches.length >= 2) {
       g.mode = "scroll";
-      // Scroll "natural" (como en Mac / iPhone)
-      send(`s,${(-dx * SCROLL).toFixed(1)},${(dy * SCROLL).toFixed(1)}`);
+      send(`s,${(-dx * SCROLL).toFixed(1)},${(dy * SCROLL).toFixed(1)}`);  // scroll natural
     } else if (g.mode !== "scroll" && g.maxF === 1) {
-      if (g.maybeDrag && !dragging && g.moved > TAP_MOVE) {
-        dragging = true; send("d,l");
-      }
+      if (g.maybeDrag && !dragging && g.moved > TAP_MOVE) { dragging = true; send("d,l"); }
       const v = Math.hypot(dx, dy) / dt;              // px/ms
       const gain = sens * (1 + ACCEL * Math.min(v, 4));
       send(`m,${(dx * gain).toFixed(2)},${(dy * gain).toFixed(2)}`);
@@ -145,22 +200,97 @@
   pad.addEventListener("touchend", end, { passive: false });
   pad.addEventListener("touchcancel", end, { passive: false });
 
-  // ---- Botones físicos ----
-  for (const el of document.querySelectorAll("#btns [data-b]")) {
+  // ---- Botones del mouse ----
+  for (const el of document.querySelectorAll("[data-b]")) {
     const b = el.dataset.b;
-    el.addEventListener("touchstart", (e) => { e.preventDefault(); el.classList.add("on"); send("d," + b); });
-    const up = (e) => { e.preventDefault(); el.classList.remove("on"); send("u," + b); };
-    el.addEventListener("touchend", up); el.addEventListener("touchcancel", up);
+    onTap(el, () => { el.classList.add("on"); send("d," + b); },
+              () => { el.classList.remove("on"); send("u," + b); });
   }
-  // "Mantener": alterna el botón izquierdo apretado (para arrastrar largas distancias)
-  const dragBtn = document.getElementById("drag");
+  const dragBtn = $("drag");
   let locked = false;
-  dragBtn.addEventListener("touchstart", (e) => {
-    e.preventDefault(); locked = !locked;
-    dragBtn.classList.toggle("on", locked); send(locked ? "d,l" : "u,l");
-  });
+  onTap(dragBtn, () => { locked = !locked;
+    dragBtn.classList.toggle("on", locked); send(locked ? "d,l" : "u,l"); });
 
-  // Evitar zoom con pellizco / doble tap en Safari
+  // ---- Teclado ----
+  const ta = $("ta"), echo = $("echo");
+  const SENT = "​".repeat(8);   // relleno invisible: permite detectar ⌫ con el campo "vacío"
+  const mods = new Set();
+  let echoText = "";
+
+  function resetTa() { ta.value = SENT; ta.setSelectionRange(SENT.length, SENT.length); }
+  resetTa();
+
+  function showEcho(s) {
+    echoText = (echoText + s).slice(-60);
+    echo.textContent = echoText.replace(/\n/g, "⏎");
+  }
+  function clearMods() {
+    mods.clear();
+    for (const el of document.querySelectorAll("[data-m]")) el.classList.remove("on");
+  }
+  function sendKey(key, label) {
+    send(`k,${[...mods].join("+")},${key}`);
+    showEcho(mods.size ? `[${[...mods, label || key].join("+")}]` : (label || ""));
+    clearMods();
+  }
+
+  // ⌨ abre/cierra el teclado del iPhone (focus() tiene que ir en touchend en iOS)
+  const kbdBtn = $("kbd");
+  let kbOpenAtTouch = false;
+  kbdBtn.addEventListener("touchstart", (e) => { e.preventDefault();
+    kbOpenAtTouch = document.activeElement === ta; }, { passive: false });
+  kbdBtn.addEventListener("touchend", (e) => { e.preventDefault();
+    if (kbOpenAtTouch) { ta.blur(); app.classList.remove("kb"); }
+    else { app.classList.add("kb"); resetTa(); ta.focus(); }
+  });
+  ta.addEventListener("blur", () => { app.classList.remove("kb"); clearMods(); });
+
+  // Lo que se escribe en el campo invisible se compara con el relleno y se manda la diferencia
+  let composing = false;
+  ta.addEventListener("compositionstart", () => composing = true);
+  ta.addEventListener("compositionend", () => { composing = false; flush(); });
+  ta.addEventListener("input", () => { if (!composing) flush(); });
+
+  function flush() {
+    const v = ta.value;
+    let i = 0;
+    while (i < SENT.length && i < v.length && v[i] === SENT[i]) i++;
+    const dels = SENT.length - i;
+    const ins = v.slice(i).replace(/​/g, "");
+    resetTa();
+    for (let k = 0; k < dels; k++) sendKey("backspace", "⌫");
+    if (!ins) return;
+    if (mods.size && [...ins].length === 1) {      // atajo: Ctrl+C, Super+Q, ...
+      sendKey(ins === "\n" ? "enter" : ins, ins === "\n" ? "⏎" : ins);
+    } else {
+      send("t," + ins); showEcho(ins); clearMods();
+    }
+  }
+
+  // Teclas especiales y modificadores (Ctrl/Alt/Super quedan "pegados" hasta la próxima tecla)
+  for (const el of document.querySelectorAll("[data-k]")) {
+    onTap(el, () => { el.classList.add("on"); sendKey(el.dataset.k, el.textContent); },
+              () => el.classList.remove("on"));
+  }
+  for (const el of document.querySelectorAll("[data-m]")) {
+    const m = el.dataset.m;
+    onTap(el, () => {
+      if (mods.has(m)) {
+        // Segundo toque sobre el mismo modificador: lo manda solo (p. ej. Super)
+        if (mods.size === 1) { mods.delete(m); send(`k,${m},`); showEcho(`[${m}]`); }
+        else mods.delete(m);
+        el.classList.remove("on");
+      } else { mods.add(m); el.classList.add("on"); }
+    });
+  }
+
+  // Cuando aparece el teclado del iPhone, achicar la app al área visible
+  const vv = window.visualViewport;
+  if (vv) {
+    const fit = () => { app.style.height = vv.height + "px"; window.scrollTo(0, 0); };
+    vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit);
+  }
+
   document.addEventListener("gesturestart", (e) => e.preventDefault());
 })();
 </script>

@@ -12,6 +12,7 @@ import asyncio
 import errno
 import pathlib
 import secrets
+import shutil
 import socket
 import sys
 
@@ -115,6 +116,104 @@ class VirtualMouse:
 
 
 # --------------------------------------------------------------------------
+# Teclado virtual
+# --------------------------------------------------------------------------
+# Distribución US: carácter -> (nombre de tecla, requiere shift).
+# Se usa para atajos (Ctrl+C, Super+Q...) y como respaldo si no hay wtype.
+_US_PLAIN = {
+    **{c: c.upper() for c in "abcdefghijklmnopqrstuvwxyz"},
+    **{c: c for c in "0123456789"},
+    " ": "SPACE", "-": "MINUS", "=": "EQUAL", "[": "LEFTBRACE", "]": "RIGHTBRACE",
+    "\\": "BACKSLASH", ";": "SEMICOLON", "'": "APOSTROPHE", "`": "GRAVE",
+    ",": "COMMA", ".": "DOT", "/": "SLASH", "\t": "TAB", "\n": "ENTER",
+}
+_US_SHIFT = {
+    **{c.upper(): c.upper() for c in "abcdefghijklmnopqrstuvwxyz"},
+    "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7",
+    "*": "8", "(": "9", ")": "0", "_": "MINUS", "+": "EQUAL", "{": "LEFTBRACE",
+    "}": "RIGHTBRACE", "|": "BACKSLASH", ":": "SEMICOLON", '"': "APOSTROPHE",
+    "~": "GRAVE", "<": "COMMA", ">": "DOT", "?": "SLASH",
+}
+US_MAP = {**{c: (k, False) for c, k in _US_PLAIN.items()},
+          **{c: (k, True) for c, k in _US_SHIFT.items()}}
+
+SPECIAL = {
+    "esc": "ESC", "tab": "TAB", "enter": "ENTER", "backspace": "BACKSPACE",
+    "delete": "DELETE", "left": "LEFT", "right": "RIGHT", "up": "UP", "down": "DOWN",
+    "home": "HOME", "end": "END", "pageup": "PAGEUP", "pagedown": "PAGEDOWN",
+    "space": "SPACE", **{f"f{i}": f"F{i}" for i in range(1, 13)},
+}
+MODS = {"ctrl": "LEFTCTRL", "alt": "LEFTALT", "shift": "LEFTSHIFT", "super": "LEFTMETA"}
+
+
+class VirtualKeyboard:
+    def __init__(self, dry_run=False, use_wtype=True):
+        self.dry_run = dry_run
+        self.wtype = shutil.which("wtype") if use_wtype else None
+        if dry_run:
+            self.ui = None
+            return
+        from evdev import UInput, ecodes as e
+
+        self.e = e
+        names = {k for k, _ in US_MAP.values()} | set(SPECIAL.values()) | set(MODS.values())
+        self.code = {n: getattr(e, "KEY_" + n) for n in names}
+        self.ui = UInput({e.EV_KEY: list(self.code.values())}, name="Phone Keyboard",
+                         vendor=0x1234, product=0x5679)
+
+    def _log(self, *a):
+        print("[dry-run]", *a)
+
+    def _tap(self, key, mods=()):
+        if self.dry_run:
+            return self._log("key", "+".join([*mods, key]))
+        e, c = self.e, self.code
+        for m in mods:
+            self.ui.write(e.EV_KEY, c[m], 1)
+        self.ui.write(e.EV_KEY, c[key], 1)
+        self.ui.syn()
+        self.ui.write(e.EV_KEY, c[key], 0)
+        for m in reversed(mods):
+            self.ui.write(e.EV_KEY, c[m], 0)
+        self.ui.syn()
+
+    def key(self, mods, key):
+        """mods: 'ctrl+alt'... ; key: nombre especial, un carácter, o '' (solo modificador)."""
+        mods = [MODS[m] for m in mods.split("+") if m in MODS]
+        if key in SPECIAL:
+            return self._tap(SPECIAL[key], mods)
+        if key == "" and mods:  # p. ej. Super solo
+            return self._tap(mods[-1], mods[:-1])
+        k = US_MAP.get(key) or US_MAP.get(key.lower())
+        if k:
+            name, shift = k
+            if shift and "LEFTSHIFT" not in mods:
+                mods.append("LEFTSHIFT")
+            self._tap(name, mods)
+
+    async def type_text(self, text):
+        # Los Enter van por uinput; el resto del texto por wtype (respeta acentos, ñ, etc.)
+        for i, chunk in enumerate(text.split("\n")):
+            if i:
+                self._tap("ENTER")
+            if not chunk:
+                continue
+            if self.dry_run:
+                self._log("type", repr(chunk))
+            elif self.wtype:
+                proc = await asyncio.create_subprocess_exec(
+                    self.wtype, "-", stdin=asyncio.subprocess.PIPE)
+                await proc.communicate(chunk.encode())
+            else:
+                for ch in chunk:
+                    k = US_MAP.get(ch)
+                    if k:
+                        self._tap(k[0], ["LEFTSHIFT"] if k[1] else [])
+                    else:
+                        print(f"No puedo tipear {ch!r} sin wtype (sudo dnf install wtype)")
+
+
+# --------------------------------------------------------------------------
 # Servidor web + WebSocket
 # --------------------------------------------------------------------------
 def local_ip():
@@ -128,7 +227,7 @@ def local_ip():
         s.close()
 
 
-def make_app(mouse: VirtualMouse, token: str):
+def make_app(mouse: VirtualMouse, kb: VirtualKeyboard, token: str):
     async def index(request):
         if request.query.get("t") != token:
             return web.Response(status=403, text="Token inválido")
@@ -147,8 +246,17 @@ def make_app(mouse: VirtualMouse, token: str):
             async for msg in ws:
                 if msg.type != WSMsgType.TEXT:
                     continue
-                # Varios comandos por mensaje separados por ';'
-                for cmd in msg.data.split(";"):
+                data = msg.data
+                if data.startswith("t,"):  # texto: el mensaje entero, sin separar
+                    await kb.type_text(data[2:])
+                    continue
+                if data.startswith("k,"):  # tecla: k,<mods>,<tecla>
+                    p = data.split(",", 2)
+                    if len(p) == 3:
+                        kb.key(p[1], p[2])
+                    continue
+                # Varios comandos de mouse por mensaje separados por ';'
+                for cmd in data.split(";"):
                     p = cmd.split(",")
                     try:
                         op = p[0]
@@ -204,12 +312,18 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--token", help="token fijo (por defecto uno aleatorio)")
+    ap.add_argument("--no-wtype", action="store_true",
+                    help="tipear texto directo por uinput (distribución US)")
     ap.add_argument("--dry-run", action="store_true", help="no mueve el mouse, solo imprime")
     args = ap.parse_args()
 
     token = args.token or secrets.token_urlsafe(6)
     sock, port = open_socket(args.host, args.port)
     mouse = VirtualMouse(dry_run=args.dry_run)
+    kb = VirtualKeyboard(dry_run=args.dry_run, use_wtype=not args.no_wtype)
+    if not args.dry_run and not kb.wtype:
+        print("⚠  wtype no está instalado: el texto se tipea con distribución US")
+        print("   (sin acentos ni ñ). Instalalo con:  sudo dnf install wtype")
     url = f"http://{local_ip()}:{port}/?t={token}"
 
     print("\nAbrí esta URL en el celular (misma red Wi-Fi):\n")
@@ -223,7 +337,7 @@ def main():
     except ImportError:
         print("(Tip: instalá python3-qrcode para ver un QR acá)")
 
-    web.run_app(make_app(mouse, token), sock=sock, print=None)
+    web.run_app(make_app(mouse, kb, token), sock=sock, print=None)
 
 
 if __name__ == "__main__":
